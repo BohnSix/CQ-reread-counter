@@ -1,22 +1,17 @@
 import random
+import sqlite3
 
 from cqhttp import CQHttp
+from apscheduler.schedulers.background import BackgroundScheduler
 
-import sqlite3
-from apscheduler.schedulers.blocking import BlockingScheduler
 
-try:
+def init():
     conn = sqlite3.connect("Record.db")
     cursor = conn.cursor()
     cursor.execute("CREATE TABLE '937518271' (message varchar(255), times int)")
     cursor.execute("CREATE TABLE '878753509' (message varchar(255), times int)")
-    values = cursor.fetchall()
     cursor.close()
     conn.close()
-except Exception as e:
-    pass
-
-sched = BlockingScheduler()
 
 
 def get_report(group_id):
@@ -51,53 +46,54 @@ def get_report(group_id):
     conn.close()
 
 
-@sched.scheduled_job('cron', day_of_week='mon-fri', hour='21', minute='23', second='10')
+def handler(context, group_id):
+    if context['group_id'] == group_id:
+
+        new_message = context['message']
+
+        conn = sqlite3.connect("Record.db")
+        cursor = conn.cursor()
+        cursor.execute("SELECT times FROM '{}' WHERE message=?".format(group_id), (new_message,))
+        values = cursor.fetchall()
+        if len(values) == 0:
+            cursor.execute("INSERT INTO '{}' (message, times) values (?, 1)".format(group_id), (new_message,))
+        else:
+            cursor.execute("UPDATE '{}' SET times=times+1 WHERE message=?".format(group_id), (new_message,))
+        cursor.close()
+        conn.commit()
+        conn.close()
+
+    if context['group_id'] == 878753509:
+        if random.random() < 0.01:
+            return {"reply": new_message, 'at_sender': False}
+
+
+sched = BackgroundScheduler()
+
+
 def report():
     get_report(878753509)  # 科协
     get_report(937518271)  # 科创
 
+
+try:
+    init()
+except Exception as e:
+    pass
 
 bot = CQHttp(api_root='http://127.0.0.1:5700')
 
 
 @bot.on_message()
 def handle_massage(context):
-    new_message = context['message']
-
-    if context['group_id'] == 878753509:
-        conn = sqlite3.connect("Record.db")
-        cursor = conn.cursor()
-        cursor.execute("SELECT times FROM '878753509' WHERE message=?", (new_message,))
-        values = cursor.fetchall()
-        if len(values) == 0:
-            cursor.execute("INSERT INTO '878753509' (message, times) values (?, 1)", (new_message,))
-        else:
-            cursor.execute("UPDATE '878753509' SET times=times+1 WHERE message=?", (new_message,))
-        cursor.close()
-        conn.commit()
-        conn.close()
-
-        if random.random() < 0.142857:
-            return {"reply": new_message, 'at_sender': False}
-
-    if context['group_id'] == 937518271:
-        conn = sqlite3.connect("Record.db")
-        cursor = conn.cursor()
-        cursor.execute("SELECT times FROM '937518271' WHERE message=?", (new_message,))
-        values = cursor.fetchall()
-        if len(values) == 0:
-            cursor.execute("INSERT INTO '937518271' (message, times) values (?, 1)", (new_message,))
-        else:
-            cursor.execute("UPDATE '937518271' SET times=times+1 WHERE message=?", (new_message,))
-        cursor.close()
-        conn.commit()
-        conn.close()
+    handler(context, 878753509)
+    handler(context, 937518271)
 
     return {"reply": None, 'at_sender': False}
 
 
-report()
+sched.add_job(report, 'cron', hour='23', minute='55')
 
 sched.start()
 
-bot.run(host='47.94.16.227', port=8080)
+bot.run(host='127.0.0.1', port=8080, debug=True)
